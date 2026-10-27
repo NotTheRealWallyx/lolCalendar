@@ -13,6 +13,7 @@ export type League = {
 export type Team = {
   name: string
   code: string
+  image: string
   gameWins: number | null
   outcome: 'win' | 'loss' | null
 }
@@ -31,6 +32,9 @@ export type Match = {
 
 const HIDDEN_LEAGUE_SLUGS = new Set(['tft_esports'])
 
+// The API mixes http:// and https:// image URLs; http ones are blocked as mixed content on https pages.
+export const toHttps = (url: string) => url.replace(/^http:\/\//, 'https://')
+
 export const toLeagues = (apiLeagues: ApiLeague[]): League[] =>
   apiLeagues
     .filter((l) => l.displayPriority.status !== 'hidden' && !HIDDEN_LEAGUE_SLUGS.has(l.slug))
@@ -40,7 +44,7 @@ export const toLeagues = (apiLeagues: ApiLeague[]): League[] =>
       name: l.name,
       region: l.region,
       regionCode: regionCode(l.region),
-      image: l.image,
+      image: toHttps(l.image),
     }))
 
 const isTbd = (team: ApiTeam) => team.code === 'TBD' || team.name === 'TBD'
@@ -48,6 +52,7 @@ const isTbd = (team: ApiTeam) => team.code === 'TBD' || team.name === 'TBD'
 const toTeam = (team: ApiTeam): Team => ({
   name: team.name,
   code: team.code,
+  image: toHttps(team.image),
   gameWins: team.result?.gameWins ?? null,
   outcome: team.result?.outcome ?? null,
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { regionCode } from '../server/lolesports/regions'
-import { toLeagues, toMatches } from '../server/model'
+import { regionCode } from '../lib/lolesports/regions'
+import { toLeagues, toMatches } from '../lib/model'
 import { leaguesFixture, scheduleFixture } from './fixtures'
 
 describe('toLeagues', () => {
@@ -13,6 +13,12 @@ describe('toLeagues', () => {
     expect(bySlug.get('lpl')?.regionCode).toBe('CN')
     expect(bySlug.get('lec')?.regionCode).toBe('EMEA')
     expect(bySlug.get('worlds')?.regionCode).toBe('International')
+  })
+
+  it('serves league logos over https', () => {
+    expect(bySlug.get('worlds')?.image).toBe(
+      'https://static.lolesports.com/leagues/1592594612171_WorldsDarkBG.png',
+    )
   })
 
   it('drops hidden and non-LoL leagues', () => {
@@ -49,6 +55,13 @@ describe('toMatches', () => {
       ['LYON', 1, 'loss'],
       ['GEN', 2, 'win'],
     ])
+  })
+
+  it('serves team logos over https', () => {
+    const match = matches.find((m) => m.id === '115660540726095041')
+    expect(match?.teams[0].image).toBe(
+      'https://static.lolesports.com/teams/1743717443673_isotypelyon-03.png',
+    )
   })
 
   it('skips events without a match', () => {

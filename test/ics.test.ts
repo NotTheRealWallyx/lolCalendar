@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { buildCalendar, escapeText, eventSummary, foldLine, formatDate } from '../server/ics'
-import { toMatches } from '../server/model'
-import type { StoredMatch } from '../server/sync'
+import { buildCalendar, escapeText, eventSummary, foldLine, formatDate } from '../lib/ics'
+import { toMatches } from '../lib/model'
+import type { StoredMatch } from '../lib/sync'
 import { scheduleFixture } from './fixtures'
 
 const now = new Date('2026-10-26T12:00:00Z')
@@ -47,8 +47,20 @@ describe('eventSummary', () => {
 })
 
 describe('buildCalendar', () => {
-  const ics = buildCalendar(stored, new Map([['worlds', 'International']]), now)
+  const params = {
+    name: 'LoL Esports · Worlds (International)',
+    description: 'Worlds matches, from lolesports.com',
+    matches: stored,
+    regionBySlug: new Map([['worlds', 'International']]),
+    now,
+  }
+  const ics = buildCalendar(params)
   const text = unfold(ics)
+
+  it('names the calendar', () => {
+    expect(text).toContain('X-WR-CALNAME:LoL Esports · Worlds (International)\r\n')
+    expect(text).toContain('X-WR-CALDESC:Worlds matches\\, from lolesports.com\r\n')
+  })
 
   it('emits one event per match with CRLF line endings', () => {
     expect(text.match(/BEGIN:VEVENT/g)).toHaveLength(stored.length)
@@ -59,7 +71,9 @@ describe('buildCalendar', () => {
   it('uses stable UIDs and carries the sequence', () => {
     expect(text).toContain('UID:lolesports-match-115660540726095133@lol-calendar')
     expect(text).toContain('SEQUENCE:2')
-    expect(buildCalendar(stored, new Map(), now)).toContain('UID:lolesports-match-115660540726095133')
+    expect(buildCalendar({ ...params, regionBySlug: new Map() })).toContain(
+      'UID:lolesports-match-115660540726095133',
+    )
   })
 
   it('sets the duration from the best-of', () => {

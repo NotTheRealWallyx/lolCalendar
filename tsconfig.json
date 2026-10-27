@@ -13,8 +13,7 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true
+    "noEmit": true
   },
-  "include": ["server", "shared", "web", "test", "vite.config.ts"]
+  "include": ["lib", "scripts", "web", "test", "vite.config.ts"]
 }

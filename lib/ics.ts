@@ -98,22 +98,28 @@ const buildEvent = (match: StoredMatch, regionCode: string | undefined, now: Dat
   ]
 }
 
-export const buildCalendar = (
-  matches: StoredMatch[],
-  regionBySlug: Map<string, string>,
-  now: Date,
-): string => {
+export type BuildCalendarParams = {
+  name: string
+  description: string
+  matches: StoredMatch[]
+  regionBySlug: Map<string, string>
+  now: Date
+}
+
+export const buildCalendar = (params: BuildCalendarParams): string => {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
     'PRODID:-//lol-calendar//lolesports schedule//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:LoL Esports',
-    'X-WR-CALDESC:League of Legends esports matches from lolesports.com',
+    `X-WR-CALNAME:${escapeText(params.name)}`,
+    `X-WR-CALDESC:${escapeText(params.description)}`,
     'REFRESH-INTERVAL;VALUE=DURATION:PT1H',
     'X-PUBLISHED-TTL:PT1H',
-    ...matches.flatMap((match) => buildEvent(match, regionBySlug.get(match.leagueSlug), now)),
+    ...params.matches.flatMap((match) =>
+      buildEvent(match, params.regionBySlug.get(match.leagueSlug), params.now),
+    ),
     'END:VCALENDAR',
   ]
   return lines.map(foldLine).join(CRLF) + CRLF

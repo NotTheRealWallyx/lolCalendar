@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { Match } from '../server/model'
-import { mergeMatches, type StoredMatch } from '../server/sync'
+import type { Match } from '../lib/model'
+import { mergeMatches, type StoredMatch } from '../lib/sync'
 
 const now = new Date('2026-10-26T12:00:00Z')
 const earlier = '2026-10-20T12:00:00.000Z'
 
-const tbd = { name: 'TBD', code: 'TBD', gameWins: null, outcome: null }
+const tbd = { name: 'TBD', code: 'TBD', image: '', gameWins: null, outcome: null }
 
 const makeMatch = (overrides: Partial<Match> = {}): Match => ({
   id: '1',
@@ -43,8 +43,8 @@ describe('mergeMatches', () => {
     const real = makeMatch({
       isPlaceholder: false,
       teams: [
-        { name: 'Gen.G Esports', code: 'GEN', gameWins: null, outcome: null },
-        { name: 'T1', code: 'T1', gameWins: null, outcome: null },
+        { name: 'Gen.G Esports', code: 'GEN', image: '', gameWins: null, outcome: null },
+        { name: 'T1', code: 'T1', image: '', gameWins: null, outcome: null },
       ],
     })
     const { matches, diff } = mergeMatches(store(makeMatch()), [real], now)

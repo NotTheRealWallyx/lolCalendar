@@ -1,11 +1,17 @@
 import './style.css'
-import type { LeagueWithSetting } from '../server/service'
-import type { StoredMatch, SyncDiff } from '../server/sync'
-import type { Match } from '../server/model'
-import { FEED_PATH, SERVER_PORT } from '../shared/config'
-import * as api from './api'
+import type { League, Match, Team } from '../lib/model'
+import {
+  CHANGES_PATH,
+  feedPath,
+  HISTORY_PATH,
+  LEAGUES_PATH,
+  type ChangesFile,
+  type History,
+  type LeaguesFile,
+} from '../lib/site'
+import type { StoredMatch, SyncDiff } from '../lib/sync'
 
-type Child = Node | string | null | false
+type Child = Node | string | null | false | undefined
 type Attrs = Record<string, string | boolean | EventListener>
 
 const h = (tag: string, attrs: Attrs = {}, ...children: Child[]): HTMLElement => {
@@ -19,277 +25,504 @@ const h = (tag: string, attrs: Attrs = {}, ...children: Child[]): HTMLElement =>
   return el
 }
 
+const HIDDEN_STORAGE_KEY = 'lol-calendar:hidden-leagues'
+const SECTIONS_STORAGE_KEY = 'lol-calendar:sections'
+const LEAGUES_PANEL = 'leagues'
+const STALE_AFTER_MS = 3 * 60 * 60 * 1000
+
+const readStored = <T>(key: string, fallback: T): T => {
+  try {
+    const saved = localStorage.getItem(key)
+    return saved ? (JSON.parse(saved) as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+const writeStored = (key: string, value: unknown) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Storage can be unavailable (private mode); preferences then last for this visit only.
+  }
+}
+
 const state = {
-  leagues: [] as LeagueWithSetting[],
+  leagues: [] as League[],
   matches: [] as StoredMatch[],
-  lastFetchedAt: null as string | null,
-  stale: false,
+  changes: null as SyncDiff | null,
+  generatedAt: null as string | null,
+  hidden: new Set(readStored<string[]>(HIDDEN_STORAGE_KEY, [])),
+  sections: readStored<Record<string, boolean>>(SECTIONS_STORAGE_KEY, {}),
+  copied: null as string | null,
   loading: true,
-  syncing: false,
-  syncResult: null as SyncDiff | null,
   error: null as string | null,
 }
 
-const feedUrl = `webcal://${location.hostname}:${SERVER_PORT}${FEED_PATH}`
+const getJson = async <T>(path: string): Promise<T> => {
+  const res = await fetch(path, { cache: 'no-cache' })
+  if (!res.ok) throw new Error(`Could not load ${path} (${res.status})`)
+  return (await res.json()) as T
+}
+
+const feedUrls = (slug: string) => {
+  const https = new URL(feedPath(slug), location.href).href
+  return { https, webcal: https.replace(/^https?:/, 'webcal:') }
+}
 
 const dayFormat = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+const shortFormat = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
-const dateTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+const relativeFormat = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 
-const regionByLeague = () => new Map(state.leagues.map((l) => [l.slug, l.regionCode]))
-
-const loadMatches = async () => {
-  const result = await api.getMatches()
-  state.matches = result.matches
-  state.lastFetchedAt = result.lastFetchedAt
-  state.stale = result.stale
+const relativeTime = (iso: string) => {
+  const minutes = Math.round((Date.parse(iso) - Date.now()) / 60_000)
+  if (Math.abs(minutes) < 60) return relativeFormat.format(minutes, 'minute')
+  const hours = Math.round(minutes / 60)
+  if (Math.abs(hours) < 48) return relativeFormat.format(hours, 'hour')
+  return relativeFormat.format(Math.round(hours / 24), 'day')
 }
 
-const run = async (task: () => Promise<void>) => {
-  try {
-    state.error = null
-    await task()
-  } catch (err) {
-    state.error = err instanceof Error ? err.message : String(err)
-  } finally {
-    render()
-  }
+const startOfToday = () => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return today
 }
 
-const toggleLeague = (league: LeagueWithSetting) =>
-  run(async () => {
-    league.enabled = !league.enabled
-    render()
-    try {
-      await api.setLeagueEnabled(league.slug, league.enabled)
-    } catch (err) {
-      league.enabled = !league.enabled
-      throw err
-    }
-    await loadMatches()
-  })
+const upcomingMatches = () => {
+  const from = startOfToday().getTime()
+  return state.matches.filter((m) => Date.parse(m.startTime) >= from)
+}
 
-const syncNow = () =>
-  run(async () => {
-    state.syncing = true
-    state.syncResult = null
-    render()
-    try {
-      state.syncResult = await api.sync()
-      await loadMatches()
-    } finally {
-      state.syncing = false
-    }
-  })
+const logo = (src: string, className: string) =>
+  src
+    ? h('img', {
+        class: className,
+        src,
+        alt: '',
+        loading: 'lazy',
+        decoding: 'async',
+        onerror: (event: Event) => (event.target as HTMLElement).classList.add('broken'),
+      })
+    : h('span', { class: `${className} broken` })
 
-const renderHeader = () =>
+const copyLink = async (slug: string) => {
+  await navigator.clipboard.writeText(feedUrls(slug).https)
+  state.copied = slug
+  render()
+  setTimeout(() => {
+    if (state.copied === slug) {
+      state.copied = null
+      render()
+    }
+  }, 2000)
+}
+
+const setShown = (slug: string | null, shown: boolean) => {
+  if (slug === null) state.hidden.clear()
+  else if (shown) state.hidden.delete(slug)
+  else state.hidden.add(slug)
+  writeStored(HIDDEN_STORAGE_KEY, [...state.hidden])
+  render()
+}
+
+// Rendering replaces the whole DOM, so <details> elements get their open state from here.
+const collapsible = (params: {
+  id: string
+  defaultOpen: boolean
+  className: string
+  summary: Child[]
+  body: Child[]
+}) =>
+  h(
+    'details',
+    {
+      class: params.className,
+      open: state.sections[params.id] ?? params.defaultOpen,
+      ontoggle: (event: Event) => {
+        const open = (event.target as HTMLDetailsElement).open
+        // Creating an open <details> also fires "toggle"; don't freeze defaults into storage.
+        if (state.sections[params.id] === undefined && open === params.defaultOpen) return
+        state.sections[params.id] = open
+        writeStored(SECTIONS_STORAGE_KEY, state.sections)
+      },
+    },
+    h('summary', {}, ...params.summary, h('span', { class: 'chevron', 'aria-hidden': 'true' })),
+    ...params.body,
+  )
+
+const matchup = (match: Match) => `${match.teams[0].code} vs ${match.teams[1].code}`
+
+const renderTopBar = () =>
   h(
     'header',
-    { class: 'header' },
+    { class: 'topbar' },
     h(
       'div',
-      {},
-      h('h1', {}, 'LoL Calendar'),
-      h('p', { class: 'muted' }, 'lolesports.com schedule, live in Apple Calendar'),
+      { class: 'brand' },
+      h('span', { class: 'brand-mark', 'aria-hidden': 'true' }),
+      h('span', {}, 'LoL Esports Calendar'),
     ),
-    h(
-      'div',
-      { class: 'actions' },
-      h('a', { class: 'button primary', href: feedUrl }, 'Subscribe in Apple Calendar'),
-      h('a', { class: 'button', href: `${FEED_PATH}?download=1` }, 'Download .ics'),
+    state.generatedAt &&
       h(
-        'button',
-        { class: 'button', onclick: () => void syncNow(), disabled: state.syncing },
-        state.syncing ? 'Syncing…' : 'Sync now',
+        'span',
+        { class: 'updated', title: new Date(state.generatedAt).toLocaleString() },
+        h('span', { class: 'pulse', 'aria-hidden': 'true' }),
+        `Updated ${relativeTime(state.generatedAt)}`,
       ),
-    ),
   )
 
-const matchLabel = (match: Match) => {
-  const [home, away] = match.teams
-  return `${match.leagueName} · ${home.code} vs ${away.code}`
-}
-
-const renderDiffList = (title: string, items: string[]) =>
-  items.length > 0 &&
-  h(
-    'div',
-    { class: 'diff-group' },
-    h('h3', {}, title),
-    h('ul', {}, ...items.slice(0, 10).map((item) => h('li', {}, item))),
-    items.length > 10 && h('p', { class: 'muted' }, `…and ${items.length - 10} more`),
-  )
-
-const renderSyncResult = (diff: SyncDiff) => {
-  const total = diff.added.length + diff.filled.length + diff.rescheduled.length + diff.updated
-  if (total === 0) return h('div', { class: 'notice' }, 'Already up to date.')
-
-  const summary = [
-    `${diff.added.length} new`,
-    `${diff.filled.length} ${diff.filled.length === 1 ? 'placeholder' : 'placeholders'} filled`,
-    `${diff.rescheduled.length} rescheduled`,
-    `${diff.updated} updated`,
-  ].join(' · ')
-
-  return h(
-    'div',
-    { class: 'notice success' },
-    h('strong', {}, summary),
-    h('p', { class: 'muted' }, 'Apple Calendar picks this up on its next refresh. Press ⌘R in Calendar to pull it now.'),
-    renderDiffList('Placeholders filled', diff.filled.map(matchLabel)),
-    renderDiffList(
-      'Rescheduled',
-      diff.rescheduled.map(
-        ({ match, previousStartTime }) =>
-          `${matchLabel(match)}: ${dateTimeFormat.format(new Date(previousStartTime))} → ${dateTimeFormat.format(new Date(match.startTime))}`,
-      ),
-    ),
-    renderDiffList('New matches', diff.added.map(matchLabel)),
-  )
-}
-
-const renderStatus = () =>
+const renderHero = () =>
   h(
     'section',
-    { class: 'status' },
-    state.error && h('div', { class: 'notice error' }, state.error),
-    state.stale &&
-      h('div', { class: 'notice warning' }, 'Could not reach lolesports.com. Showing the last synced schedule.'),
-    state.syncResult && renderSyncResult(state.syncResult),
-    state.lastFetchedAt &&
-      h('p', { class: 'muted' }, `Last synced ${dateTimeFormat.format(new Date(state.lastFetchedAt))}`),
+    { class: 'hero' },
+    h('h1', {}, 'Every LoL esports match, in your calendar'),
+    h(
+      'p',
+      { class: 'lead' },
+      'Subscribe to the leagues you follow. Placeholder matches fill in with the real teams as soon as they are decided. Updated hourly from lolesports.com.',
+    ),
   )
 
+const renderSteps = () =>
+  h(
+    'ol',
+    { class: 'steps' },
+    h('li', {}, h('strong', {}, 'Pick a league'), ' and press Subscribe.'),
+    h('li', {}, h('strong', {}, 'Confirm'), ' in Apple Calendar (or paste the copied link into Google Calendar → From URL).'),
+    h('li', {}, h('strong', {}, 'Done.'), ' Each league is its own calendar, so you can colour or hide it.'),
+  )
+
+const renderNotices = () => {
+  const notices: Child[] = []
+  if (state.error) notices.push(h('div', { class: 'notice error' }, state.error))
+  if (state.generatedAt && Date.now() - Date.parse(state.generatedAt) > STALE_AFTER_MS) {
+    notices.push(
+      h('div', { class: 'notice warning' }, `The schedule has not refreshed since ${relativeTime(state.generatedAt)}. Feeds still serve the last known schedule.`),
+    )
+  }
+
+  const diff = state.changes
+  if (diff) {
+    const parts = [
+      diff.added.length && `${diff.added.length} new`,
+      diff.filled.length && `${diff.filled.length} ${diff.filled.length === 1 ? 'placeholder' : 'placeholders'} filled`,
+      diff.rescheduled.length && `${diff.rescheduled.length} rescheduled`,
+      diff.updated && `${diff.updated} updated`,
+    ].filter(Boolean)
+    if (parts.length > 0) {
+      notices.push(
+        h(
+          'div',
+          { class: 'notice' },
+          h('strong', {}, 'Last update: '),
+          parts.join(' · '),
+          diff.filled.length > 0 &&
+            h('span', { class: 'muted' }, ` — ${diff.filled.slice(0, 4).map((m) => `${m.leagueName} ${matchup(m)}`).join(', ')}${diff.filled.length > 4 ? '…' : ''}`),
+        ),
+      )
+    }
+  }
+  return notices.length > 0 ? h('section', { class: 'notices' }, ...notices) : null
+}
+
+const regionOrder = (a: string, b: string) =>
+  a === 'International' ? -1 : b === 'International' ? 1 : a.localeCompare(b)
+
+const renderLeagueCard = (league: League, next: StoredMatch | undefined, upcomingCount: number) => {
+  const urls = feedUrls(league.slug)
+  const shown = !state.hidden.has(league.slug)
+  return h(
+    'article',
+    { class: `league-card${upcomingCount === 0 ? ' quiet' : ''}` },
+    h(
+      'div',
+      { class: 'league-head' },
+      h('div', { class: 'league-logo-tile' }, logo(league.image, 'league-logo')),
+      h(
+        'div',
+        { class: 'league-title' },
+        h('h3', {}, league.name),
+        h('span', { class: 'chip' }, league.regionCode),
+      ),
+    ),
+    h(
+      'p',
+      { class: 'league-next' },
+      ...(next
+        ? ['Next: ', h('strong', {}, matchup(next)), ` · ${shortFormat.format(new Date(next.startTime))}`]
+        : ['No upcoming matches']),
+    ),
+    h(
+      'div',
+      { class: 'league-actions' },
+      h('a', { class: 'button primary', href: urls.webcal }, 'Subscribe'),
+      h(
+        'button',
+        {
+          class: 'button',
+          type: 'button',
+          title: urls.https,
+          onclick: () => void copyLink(league.slug).catch(() => window.prompt('Copy this link:', urls.https)),
+        },
+        state.copied === league.slug ? 'Copied ✓' : 'Copy link',
+      ),
+    ),
+    h(
+      'label',
+      { class: 'toggle' },
+      h('input', {
+        id: `show-${league.slug}`,
+        type: 'checkbox',
+        checked: shown,
+        onchange: () => setShown(league.slug, !shown),
+      }),
+      h('span', { class: 'switch', 'aria-hidden': 'true' }),
+      'Show in schedule',
+    ),
+  )
+}
+
 const renderLeagues = () => {
-  const groups = new Map<string, LeagueWithSetting[]>()
+  const upcoming = upcomingMatches()
+  const nextBySlug = new Map<string, StoredMatch>()
+  const countBySlug = new Map<string, number>()
+  for (const match of upcoming) {
+    if (!nextBySlug.has(match.leagueSlug)) nextBySlug.set(match.leagueSlug, match)
+    countBySlug.set(match.leagueSlug, (countBySlug.get(match.leagueSlug) ?? 0) + 1)
+  }
+
+  const groups = new Map<string, League[]>()
   for (const league of state.leagues) {
     groups.set(league.regionCode, [...(groups.get(league.regionCode) ?? []), league])
   }
-  const regions = [...groups.keys()].sort((a, b) =>
-    a === 'International' ? -1 : b === 'International' ? 1 : a.localeCompare(b),
-  )
-  const enabledCount = state.leagues.filter((l) => l.enabled).length
+
+  const active = [...countBySlug.keys()]
+  const shownActive = active.filter((slug) => !state.hidden.has(slug)).length
+
+  const regions = [...groups.keys()].sort(regionOrder).map((region) => {
+    const leagues = [...(groups.get(region) ?? [])].sort(
+      (a, b) => Number(countBySlug.has(b.slug)) - Number(countBySlug.has(a.slug)),
+    )
+    const withMatches = leagues.filter((l) => countBySlug.has(l.slug)).length
+    return collapsible({
+      id: `region:${region}`,
+      defaultOpen: withMatches > 0,
+      className: 'region',
+      summary: [
+        h('span', { class: 'region-name' }, region),
+        h(
+          'span',
+          { class: 'muted' },
+          `${leagues.length} ${leagues.length === 1 ? 'league' : 'leagues'}${withMatches > 0 ? ` · ${withMatches} with matches` : ''}`,
+        ),
+      ],
+      body: [
+        h(
+          'div',
+          { class: 'league-grid' },
+          ...leagues.map((l) => renderLeagueCard(l, nextBySlug.get(l.slug), countBySlug.get(l.slug) ?? 0)),
+        ),
+      ],
+    })
+  })
 
   return h(
-    'aside',
-    { class: 'panel leagues' },
-    h('h2', {}, 'Leagues ', h('span', { class: 'muted' }, `${enabledCount} synced`)),
-    ...regions.map((region) =>
-      h(
-        'div',
-        { class: 'region' },
-        h('h3', {}, region),
-        ...(groups.get(region) ?? []).map((league) =>
-          h(
-            'label',
-            { class: 'toggle' },
-            h('input', {
-              type: 'checkbox',
-              checked: league.enabled,
-              onchange: () => void toggleLeague(league),
-            }),
-            h('span', { class: 'switch', 'aria-hidden': 'true' }),
-            h('span', { class: 'league-name' }, league.name),
-            h('span', { class: 'region-tag' }, league.regionCode),
-          ),
+    'section',
+    { class: 'section', id: 'leagues' },
+    collapsible({
+      id: LEAGUES_PANEL,
+      defaultOpen: false,
+      className: 'leagues-panel',
+      summary: [
+        h(
+          'span',
+          { class: 'panel-title' },
+          h('h2', {}, 'Subscribe to leagues'),
+          !state.loading &&
+            h(
+              'span',
+              { class: 'muted' },
+              `${state.leagues.length} leagues, one calendar each · ${shownActive} of ${active.length} active ${active.length === 1 ? 'league' : 'leagues'} shown in the schedule`,
+            ),
         ),
-      ),
-    ),
+      ],
+      body: [h('div', { class: 'panel-body' }, renderSteps(), ...regions)],
+    }),
   )
 }
 
-const renderTeams = (match: StoredMatch) => {
-  const [home, away] = match.teams
-  if (match.state === 'completed') {
-    return h(
-      'span',
-      { class: 'teams' },
-      h('span', { class: home.outcome === 'win' ? 'winner' : '' }, home.code),
-      h('span', { class: 'score' }, ` ${home.gameWins ?? 0}–${away.gameWins ?? 0} `),
-      h('span', { class: away.outcome === 'win' ? 'winner' : '' }, away.code),
-    )
-  }
-  return h('span', { class: 'teams' }, `${home.code} vs ${away.code}`)
-}
-
-const renderMatch = (match: StoredMatch, regions: Map<string, string>) =>
+const renderTeam = (team: Team, side: 'home' | 'away', match: StoredMatch) =>
   h(
+    'span',
+    { class: `team ${side}${match.state === 'completed' && team.outcome === 'win' ? ' winner' : ''}`, title: team.name },
+    logo(team.image, 'team-logo'),
+    h('span', { class: 'team-code' }, team.code),
+  )
+
+const renderMatch = (match: StoredMatch, leagueBySlug: Map<string, League>) => {
+  const [home, away] = match.teams
+  const league = leagueBySlug.get(match.leagueSlug)
+  const center =
+    match.state === 'completed'
+      ? h('span', { class: 'score' }, `${home.gameWins ?? 0} – ${away.gameWins ?? 0}`)
+      : h('span', { class: 'versus' }, 'vs')
+
+  return h(
     'li',
-    { class: 'match' },
-    h('time', { class: 'time' }, timeFormat.format(new Date(match.startTime))),
+    { class: `match${match.state === 'completed' ? ' done' : ''}` },
+    h('time', { class: 'match-time', datetime: match.startTime }, timeFormat.format(new Date(match.startTime))),
     h(
       'div',
-      { class: 'match-main' },
-      renderTeams(match),
-      h(
-        'span',
-        { class: 'muted' },
-        [match.leagueName, regions.get(match.leagueSlug), match.blockName, match.bestOf && `Bo${match.bestOf}`]
-          .filter(Boolean)
-          .join(' · '),
-      ),
+      { class: 'match-teams' },
+      renderTeam(home, 'home', match),
+      center,
+      renderTeam(away, 'away', match),
+    ),
+    h(
+      'div',
+      { class: 'match-meta' },
+      league && logo(league.image, 'mini-logo'),
+      h('span', {}, [match.leagueName, match.blockName, match.bestOf && `Bo${match.bestOf}`].filter(Boolean).join(' · ')),
     ),
     h(
       'div',
       { class: 'badges' },
-      match.isPlaceholder && h('span', { class: 'badge placeholder' }, 'Placeholder'),
+      match.isPlaceholder && h('span', { class: 'badge placeholder' }, 'TBD'),
       match.state === 'inProgress' && h('span', { class: 'badge live' }, 'Live'),
     ),
   )
+}
 
-const renderMatches = () => {
-  const startOfToday = new Date()
-  startOfToday.setHours(0, 0, 0, 0)
-  const upcoming = state.matches.filter((m) => new Date(m.startTime) >= startOfToday)
-  const regions = regionByLeague()
+const renderSchedule = () => {
+  const upcoming = upcomingMatches()
+  const leagueBySlug = new Map(state.leagues.map((l) => [l.slug, l]))
+  const slugsWithMatches = [...new Set(upcoming.map((m) => m.leagueSlug))]
+  const hiddenActive = slugsWithMatches.filter((slug) => state.hidden.has(slug))
+  const visible = upcoming.filter((m) => !state.hidden.has(m.leagueSlug))
 
   const days = new Map<string, StoredMatch[]>()
-  for (const match of upcoming) {
+  for (const match of visible) {
     const day = dayFormat.format(new Date(match.startTime))
     days.set(day, [...(days.get(day) ?? []), match])
   }
-  const placeholders = upcoming.filter((m) => m.isPlaceholder).length
+
+  const chip = (params: { id: string; label: string; active: boolean; onclick: () => void; image?: string }) =>
+    h(
+      'button',
+      {
+        id: params.id,
+        class: `filter-chip${params.active ? ' active' : ''}`,
+        type: 'button',
+        'aria-pressed': String(params.active),
+        onclick: params.onclick,
+      },
+      params.image !== undefined && logo(params.image, 'mini-logo'),
+      params.label,
+    )
+
+  const showAll = () =>
+    h('button', { class: 'link-button', type: 'button', onclick: () => setShown(null, true) }, 'Show all')
 
   return h(
     'section',
-    { class: 'panel matches' },
+    { class: 'section', id: 'schedule' },
     h(
-      'h2',
-      {},
-      'Upcoming ',
-      h('span', { class: 'muted' }, `${upcoming.length} matches · ${placeholders} placeholders`),
+      'div',
+      { class: 'section-head' },
+      h('h2', {}, 'Schedule'),
+      !state.loading &&
+        h(
+          'p',
+          { class: 'muted' },
+          `${visible.length} matches · ${visible.filter((m) => m.isPlaceholder).length} still TBD · times in your timezone`,
+        ),
+      hiddenActive.length > 0 &&
+        h(
+          'p',
+          { class: 'muted' },
+          `Showing ${slugsWithMatches.length - hiddenActive.length} of ${slugsWithMatches.length} leagues · `,
+          showAll(),
+        ),
     ),
+    slugsWithMatches.length > 1 &&
+      h(
+        'div',
+        { class: 'filters' },
+        chip({ id: 'chip-all', label: 'All leagues', active: hiddenActive.length === 0, onclick: () => setShown(null, true) }),
+        ...slugsWithMatches.map((slug) => {
+          const league = leagueBySlug.get(slug)
+          const shown = !state.hidden.has(slug)
+          return chip({
+            id: `chip-${slug}`,
+            label: league?.name ?? slug,
+            active: shown,
+            onclick: () => setShown(slug, !shown),
+            image: league?.image ?? '',
+          })
+        }),
+      ),
     state.loading && h('p', { class: 'muted' }, 'Loading schedule…'),
     !state.loading &&
-      upcoming.length === 0 &&
-      h('p', { class: 'muted' }, 'No upcoming matches for the selected leagues.'),
+      visible.length === 0 &&
+      h(
+        'p',
+        { class: 'empty' },
+        ...(upcoming.length > 0
+          ? ['Every league with upcoming matches is hidden. ', showAll()]
+          : ['No upcoming matches.']),
+      ),
     ...[...days].map(([day, matches]) =>
       h(
         'div',
         { class: 'day' },
-        h('h3', {}, day),
-        h('ul', {}, ...matches.map((m) => renderMatch(m, regions))),
+        h('h3', { class: 'day-title' }, day),
+        h('ul', { class: 'match-list' }, ...matches.map((m) => renderMatch(m, leagueBySlug))),
       ),
     ),
   )
 }
 
+const renderFooter = () =>
+  h(
+    'footer',
+    { class: 'footer' },
+    'Schedule data from ',
+    h('a', { href: 'https://lolesports.com/en-GB/' }, 'lolesports.com'),
+    '. Not affiliated with or endorsed by Riot Games.',
+  )
+
 const root = document.querySelector<HTMLDivElement>('#app')
 
 const render = () => {
+  // Keep keyboard focus on the same control across full re-renders.
+  const focusedId = document.activeElement?.id
   root?.replaceChildren(
-    renderHeader(),
-    renderStatus(),
-    h('div', { class: 'layout' }, renderLeagues(), renderMatches()),
+    renderTopBar(),
+    h('main', { class: 'container' }, renderHero(), renderNotices(), renderLeagues(), renderSchedule()),
+    renderFooter(),
   )
+  if (focusedId) document.getElementById(focusedId)?.focus({ preventScroll: true })
+}
+
+const load = async () => {
+  try {
+    const [leagues, history, changes] = await Promise.all([
+      getJson<LeaguesFile>(LEAGUES_PATH),
+      getJson<History>(HISTORY_PATH),
+      getJson<ChangesFile>(CHANGES_PATH).catch(() => null),
+    ])
+    state.leagues = leagues.leagues
+    state.generatedAt = leagues.generatedAt
+    state.matches = Object.values(history.matches).sort((a, b) => a.startTime.localeCompare(b.startTime))
+    state.changes = changes?.diff ?? null
+  } catch (err) {
+    state.error = err instanceof Error ? err.message : String(err)
+  } finally {
+    state.loading = false
+    render()
+  }
 }
 
 render()
-void run(async () => {
-  try {
-    state.leagues = await api.getLeagues()
-    await loadMatches()
-  } finally {
-    state.loading = false
-  }
-})
+void load()

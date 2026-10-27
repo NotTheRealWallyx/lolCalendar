@@ -5,19 +5,22 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "tsx watch server/index.ts",
-    "dev:web": "vite",
-    "build": "vite build",
-    "start": "vite build && tsx server/index.ts",
+    "dev": "tsx scripts/build-feeds.ts --out .site-data && vite",
+    "build": "vite build && tsx scripts/build-feeds.ts --out dist",
+    "build:web": "vite build",
+    "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.5",
-    "concurrently": "^10.0.6",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   }
