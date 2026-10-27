@@ -103,6 +103,7 @@ const logo = (src: string, className: string) =>
         alt: '',
         loading: 'lazy',
         decoding: 'async',
+        referrerpolicy: 'no-referrer',
         onerror: (event: Event) => (event.target as HTMLElement).classList.add('broken'),
       })
     : h('span', { class: `${className} broken` })
@@ -493,9 +494,26 @@ const renderFooter = () =>
   h(
     'footer',
     { class: 'footer' },
-    'Schedule data from ',
-    h('a', { href: 'https://lolesports.com/en-GB/' }, 'lolesports.com'),
-    '. Not affiliated with or endorsed by Riot Games.',
+    h(
+      'p',
+      {},
+      'Schedule data from ',
+      h('a', { href: 'https://lolesports.com/en-GB/' }, 'lolesports.com'),
+      '. Not affiliated with or endorsed by Riot Games.',
+    ),
+    h(
+      'p',
+      {},
+      'No cookies, no tracking. Your league and section choices are saved only in this browser.',
+    ),
+    h(
+      'p',
+      {},
+      '© 2026 ',
+      h('a', { href: 'https://github.com/NotTheRealWallyx' }, '@NotTheRealWallyx'),
+      ' · ',
+      h('a', { href: 'https://github.com/NotTheRealWallyx/lolCalendar/blob/main/LICENSE' }, 'MIT License'),
+    ),
   )
 
 const root = document.querySelector<HTMLDivElement>('#app')
