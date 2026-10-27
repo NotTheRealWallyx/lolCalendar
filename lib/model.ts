@@ -28,6 +28,7 @@ export type Match = {
   bestOf: number | null
   teams: [Team, Team]
   isPlaceholder: boolean
+  hasVod: boolean
 }
 
 const HIDDEN_LEAGUE_SLUGS = new Set(['tft_esports'])
@@ -74,6 +75,7 @@ export const toMatches = (events: ApiEvent[]): Match[] => {
       bestOf: event.match.strategy.type === 'bestOf' ? event.match.strategy.count : null,
       teams: [toTeam(home), toTeam(away)],
       isPlaceholder: isTbd(home) || isTbd(away),
+      hasVod: event.match.flags.includes('hasVod'),
     })
   }
 

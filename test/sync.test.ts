@@ -17,6 +17,7 @@ const makeMatch = (overrides: Partial<Match> = {}): Match => ({
   bestOf: 5,
   teams: [tbd, tbd],
   isPlaceholder: true,
+  hasVod: false,
   ...overrides,
 })
 
@@ -62,6 +63,20 @@ describe('mergeMatches', () => {
     const live = makeMatch({ state: 'inProgress' })
     const { diff } = mergeMatches(store(makeMatch()), [live], now)
     expect(diff.updated).toBe(1)
+  })
+
+  it('treats history without hasVod as no VOD', () => {
+    const { hasVod: _hasVod, ...legacy } = makeMatch()
+    const stored = { '1': { ...legacy, sequence: 0, firstSeenAt: earlier, updatedAt: earlier } }
+    const { diff } = mergeMatches(stored as unknown as Record<string, StoredMatch>, [makeMatch()], now)
+    expect(diff.updated).toBe(0)
+  })
+
+  it('updates the event when a VOD becomes available', () => {
+    const done = makeMatch({ state: 'completed' })
+    const { matches, diff } = mergeMatches(store(done), [{ ...done, hasVod: true }], now)
+    expect(diff.updated).toBe(1)
+    expect(matches['1']?.sequence).toBe(1)
   })
 
   it('keeps stored matches missing from the fetch', () => {

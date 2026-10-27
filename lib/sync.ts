@@ -27,6 +27,8 @@ const contentKey = (match: Match) =>
     match.bestOf,
     match.teams,
     match.isPlaceholder,
+    // History written before VOD links existed has no hasVod field; treat it as false.
+    match.hasVod === true,
   ])
 
 export const mergeMatches = (

@@ -1,8 +1,12 @@
 import { readFileSync } from 'node:fs'
-import type { ApiLeaguesResponse, ApiScheduleResponse } from '../lib/lolesports/types'
+import { parseResponse } from '../lib/lolesports/client'
+import { ApiLeaguesResponseSchema, ApiScheduleResponseSchema } from '../lib/lolesports/types'
 
-const readFixture = <T>(name: string): T =>
-  JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')) as T
+export const readFixture = (name: string): unknown =>
+  JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'))
 
-export const leaguesFixture = readFixture<ApiLeaguesResponse>('leagues.json').data.leagues
-export const scheduleFixture = readFixture<ApiScheduleResponse>('schedule.json').data.schedule.events
+// Parsed through the same schemas as live responses, so the recorded data also checks them.
+export const leaguesFixture = parseResponse('getLeagues', ApiLeaguesResponseSchema, readFixture('leagues.json'))
+  .data.leagues
+export const scheduleFixture = parseResponse('getSchedule', ApiScheduleResponseSchema, readFixture('schedule.json'))
+  .data.schedule.events

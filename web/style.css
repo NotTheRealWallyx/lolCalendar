@@ -711,6 +711,25 @@ details[open] > summary > .chevron {
   color: var(--live-text);
 }
 
+a.badge {
+  text-decoration: none;
+}
+
+a.badge:hover {
+  text-decoration: underline;
+}
+
+.badge.vod {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.badge.vod::before {
+  content: '▶ ';
+  font-size: 9px;
+}
+
 .empty {
   padding: 32px;
   text-align: center;

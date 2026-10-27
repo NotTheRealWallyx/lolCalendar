@@ -57,6 +57,11 @@ describe('toMatches', () => {
     ])
   })
 
+  it('reads the VOD flag', () => {
+    expect(matches.find((m) => m.id === '115660540726095041')?.hasVod).toBe(true)
+    expect(matches.find((m) => m.id === '115660540726095133')?.hasVod).toBe(false)
+  })
+
   it('serves team logos over https', () => {
     const match = matches.find((m) => m.id === '115660540726095041')
     expect(match?.teams[0].image).toBe(

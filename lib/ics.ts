@@ -1,10 +1,10 @@
+import { leagueUrl, matchUrl, vodUrl } from './links'
 import type { Team } from './model'
 import type { StoredMatch } from './sync'
 
 const CRLF = '\r\n'
 const MAX_LINE_BYTES = 75
 const HOUR_MS = 60 * 60 * 1000
-const LOLESPORTS_URL = 'https://lolesports.com/en-GB/'
 
 export const escapeText = (value: string) =>
   value
@@ -61,6 +61,7 @@ const stateLine = (match: StoredMatch) => {
 const eventDescription = (match: StoredMatch, regionCode: string | undefined) => {
   const [home, away] = match.teams
   const league = regionCode ? `${match.leagueName} (${regionCode})` : match.leagueName
+  const vod = vodUrl(match)
   return [
     `${home.name} vs ${away.name}`,
     match.blockName ? `${league} — ${match.blockName}` : league,
@@ -69,7 +70,7 @@ const eventDescription = (match: StoredMatch, regionCode: string | undefined) =>
     match.isPlaceholder
       ? 'Teams to be decided. This event updates automatically once they are known.'
       : null,
-    LOLESPORTS_URL,
+    vod ? `Watch the VOD: ${vod}` : `Schedule: ${leagueUrl(match.leagueSlug)}`,
   ]
     .filter((line) => line !== null)
     .join('\n')
@@ -91,7 +92,7 @@ const buildEvent = (match: StoredMatch, regionCode: string | undefined, now: Dat
     `SUMMARY:${escapeText(eventSummary(match))}`,
     `DESCRIPTION:${escapeText(eventDescription(match, regionCode))}`,
     `CATEGORIES:${escapeText(match.leagueName)}`,
-    `URL:${LOLESPORTS_URL}`,
+    `URL:${matchUrl(match)}`,
     'STATUS:CONFIRMED',
     'TRANSP:TRANSPARENT',
     'END:VEVENT',

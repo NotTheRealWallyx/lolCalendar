@@ -80,6 +80,19 @@ describe('buildCalendar', () => {
     expect(text).toContain('DTSTART:20261114T190000Z\r\nDTEND:20261115T000000Z')
   })
 
+  it('links finished matches to their VOD', () => {
+    expect(text).toContain(
+      'Final: LYON 1–2 GEN\\nWatch the VOD: https://lolesports.com/vod/115660540726095041/1\r\n',
+    )
+    expect(text).toContain('URL:https://lolesports.com/vod/115660540726095041/1\r\n')
+  })
+
+  it('links upcoming matches to the league schedule', () => {
+    const finals = text.split('BEGIN:VEVENT').find((e) => e.includes('115660540726095133'))
+    expect(finals).toContain('Schedule: https://lolesports.com/en-GB/leagues/worlds')
+    expect(finals).toContain('URL:https://lolesports.com/en-GB/leagues/worlds\r\n')
+  })
+
   it('describes the league, region and result', () => {
     expect(text).toContain('DESCRIPTION:LYON vs Gen.G Esports\\nWorlds (International) — Swiss\\nBest of 3\\nFinal: LYON 1–2 GEN')
   })

@@ -1,4 +1,5 @@
 import './style.css'
+import { leagueUrl, vodUrl } from '../lib/links'
 import type { League, Match, Team } from '../lib/model'
 import {
   CHANGES_PATH,
@@ -360,9 +361,12 @@ const renderTeam = (team: Team, side: 'home' | 'away', match: StoredMatch) =>
     h('span', { class: 'team-code' }, team.code),
   )
 
+const externalLink = (href: string) => ({ href, target: '_blank', rel: 'noopener noreferrer' })
+
 const renderMatch = (match: StoredMatch, leagueBySlug: Map<string, League>) => {
   const [home, away] = match.teams
   const league = leagueBySlug.get(match.leagueSlug)
+  const vod = vodUrl(match)
   const center =
     match.state === 'completed'
       ? h('span', { class: 'score' }, `${home.gameWins ?? 0} – ${away.gameWins ?? 0}`)
@@ -389,7 +393,9 @@ const renderMatch = (match: StoredMatch, leagueBySlug: Map<string, League>) => {
       'div',
       { class: 'badges' },
       match.isPlaceholder && h('span', { class: 'badge placeholder' }, 'TBD'),
-      match.state === 'inProgress' && h('span', { class: 'badge live' }, 'Live'),
+      match.state === 'inProgress' &&
+        h('a', { ...externalLink(leagueUrl(match.leagueSlug)), class: 'badge live' }, 'Live'),
+      vod && h('a', { ...externalLink(vod), class: 'badge vod' }, 'VOD'),
     ),
   )
 }
